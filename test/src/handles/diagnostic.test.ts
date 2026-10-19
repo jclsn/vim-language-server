@@ -19,6 +19,15 @@ describe("diagnostics", () => {
     });
   });
 
+  it("sorts the diagnostics by position", () => {
+    const doc = TextDocument.create("file:///test.vim", "vim", 1, "a\nb\nc\n");
+    const list = getDiagnostics(doc as any, [
+      { message: "E2: two", line: 2, col: 0 },
+      { message: "E1: one", line: 0, col: 0 },
+    ]);
+    expect(list.map((d) => d.code)).to.deep.equal(["E1", "E2"]);
+  });
+
   it("reports one diagnostic per error", async () => {
     const list = await diagnose("let x = (\nfoobar\nfunction! F()\n");
     expect(list.map((d) => d.range.start.line)).to.deep.equal([0, 1, 2]);

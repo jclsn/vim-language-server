@@ -24,7 +24,8 @@ function getRange(textDoc: TextDocument, error: IParseError): Range {
 }
 
 export function getDiagnostics(textDoc: TextDocument, errors: IParseError[]): Diagnostic[] {
-  return (errors || []).map((error) => {
+  const sorted = (errors || []).slice().sort((a, b) => a.line - b.line || a.col - b.col);
+  return sorted.map((error) => {
     const m = error.message.match(codePattern);
     const diagnostic: Diagnostic = {
       source: "vimlsp",
