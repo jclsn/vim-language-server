@@ -6,6 +6,7 @@ import { catchError, filter, map, switchMap, timeout } from "rxjs/operators";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 
+import { lint } from "../common/lint";
 import logger from "../common/logger";
 import { IParseError } from "../common/parse";
 import { IParserHandles} from "../common/types";
@@ -155,7 +156,7 @@ export function next(
         if (res) {
           if (config.diagnostic.enable) {
             // handle diagnostic
-            handleDiagnostic(td, res[1]);
+            handleDiagnostic(td, res[1].concat(lint(res[0])));
           }
           // handle node
           workspace.updateBuffer(uri, res[0]);
