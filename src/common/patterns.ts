@@ -2,6 +2,11 @@ export type kindPattern = RegExp[];
 
 export const commentPattern = /^[ \t]*("|')/;
 
+// in Vim9 script a comment starts with "#", "'" and '"' start a string
+export const vim9CommentPattern = /^[ \t]*#/;
+
+export const vim9scriptPattern = /^[ \t:]*vim9s(c(r(i(pt?)?)?)?)?\b/m;
+
 export const keywordPattern = /[\w#&$<>.:]/;
 
 export const builtinFunctionPattern = /^((<SID>|\b(v|g|b|s|l|a):)?[\w#&]+)[ \t]*\([^)]*\)/;

@@ -7,7 +7,15 @@ import {Readable} from "stream";
 import {CompletionItem, InsertTextFormat, Position, Range, TextDocument} from "vscode-languageserver";
 import {INode} from "../lib/vimparser";
 import { IParseError, parseWithRecovery } from "./parse";
-import { commentPattern, keywordPattern, kindPattern, wordNextPattern, wordPrePattern } from "./patterns";
+import {
+  commentPattern,
+  keywordPattern,
+  kindPattern,
+  vim9CommentPattern,
+  vim9scriptPattern,
+  wordNextPattern,
+  wordPrePattern,
+} from "./patterns";
 import config from '../server/config';
 
 export function isSomeMatchPattern(patterns: kindPattern, line: string): boolean {
@@ -147,7 +155,7 @@ export function getWordFromPosition(
   );
 
   // comment line
-  if (commentPattern.test(currentLine)) {
+  if (isCommentLine(doc, currentLine)) {
     return;
   }
 
@@ -168,6 +176,14 @@ export function getWordFromPosition(
       ? nextSegment.replace(new RegExp(`^${wordRight[1]}`), word)
       : `${word}${nextSegment}`,
   };
+}
+
+// a comment line, with the comment syntax of the script
+export function isCommentLine(doc: TextDocument, line: string): boolean {
+  if (vim9scriptPattern.test(doc.getText())) {
+    return vim9CommentPattern.test(line);
+  }
+  return commentPattern.test(line);
 }
 
 // parse vim buffer
