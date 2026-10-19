@@ -2329,7 +2329,12 @@ VimLParser.prototype.parse_cmd_call = function() {
         throw Err("E471: Argument required", this.reader.getpos());
     }
     node.left = this.parse_expr();
-    if (node.left.type != NODE_CALL) {
+    // A method call may follow the function call: call Func()->Method()
+    var base = node.left;
+    while (base.type == NODE_METHOD) {
+        var base = base.left;
+    }
+    if (base.type != NODE_CALL) {
         throw Err("Not an function call", node.left.pos);
     }
     this.add_node(node);
