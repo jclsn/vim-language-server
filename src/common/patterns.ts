@@ -1,7 +1,5 @@
 export type kindPattern = RegExp[];
 
-export const errorLinePattern = /[^:]+:\s*(.+?):\s*line\s*([0-9]+)\s*col\s*([0-9]+)/;
-
 export const commentPattern = /^[ \t]*("|')/;
 
 export const keywordPattern = /[\w#&$<>.:]/;

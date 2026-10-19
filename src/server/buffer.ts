@@ -583,7 +583,9 @@ export class Buffer {
   }
 
   private takeFunction(node: INode) {
-    const { left, rlist, endfunction } = node;
+    const { left, rlist } = node;
+    // a function that is not closed ends where it starts
+    const end = (node.endfunction && node.endfunction.pos) || node.pos;
     const name = this.getDotName(left);
     if (!name) {
       return;
@@ -597,13 +599,13 @@ export class Buffer {
       args: rlist || [],
       startLine: pos.lnum,
       startCol: pos.col,
-      endLine: endfunction!.pos.lnum,
-      endCol: endfunction!.pos.col,
+      endLine: end.lnum,
+      endCol: end.col,
       range: {
         startLine: node.pos.lnum,
         startCol: node.pos.col,
-        endLine: endfunction!.pos.lnum,
-        endCol: endfunction!.pos.col,
+        endLine: end.lnum,
+        endCol: end.col,
       }
     };
     if (globalFuncPattern.test(name)) {

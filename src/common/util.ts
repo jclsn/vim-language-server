@@ -5,7 +5,8 @@ import fs, {Stats} from "fs";
 import path from "path";
 import {Readable} from "stream";
 import {CompletionItem, InsertTextFormat, Position, Range, TextDocument} from "vscode-languageserver";
-import {INode, StringReader, VimLParser} from "../lib/vimparser";
+import {INode, VimLParser} from "../lib/vimparser";
+import { IParseError, parseWithRecovery } from "./parse";
 import { commentPattern, keywordPattern, kindPattern, wordNextPattern, wordPrePattern } from "./patterns";
 import config from '../server/config';
 
@@ -180,15 +181,9 @@ export function getWordFromPosition(
 }
 
 // parse vim buffer
-export async function handleParse(textDoc: TextDocument | string): Promise<[INode | null, string]> {
+export async function handleParse(textDoc: TextDocument | string): Promise<[INode | null, IParseError[]]> {
   const text = textDoc instanceof Object ? textDoc.getText() : textDoc;
-  const tokens = new StringReader(text.split(/\r\n|\r|\n/));
-  try {
-    const node: INode = new VimLParser(config.isNeovim).parse(tokens);
-    return [node, ""];
-  } catch (error) {
-    return [null, error];
-  }
+  return parseWithRecovery(text.split(/\r\n|\r|\n/), config.isNeovim);
 }
 
 // remove snippets of completionItem
