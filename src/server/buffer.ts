@@ -256,6 +256,10 @@ export class Buffer {
     return this.ranges
   }
 
+  public getNode() {
+    return this.node;
+  }
+
   public getClasses() {
     return this.classes;
   }
