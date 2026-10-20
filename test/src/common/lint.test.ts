@@ -63,9 +63,38 @@ describe("lint of Vim9 script", () => {
     ]);
   });
 
+  it("reports variables declared twice in a scope", () => {
+    expect(vim9(["var x = 1", "var x = 2", "if true", "  var y = 1", "endif", "var y = 2"])).to.deep.equal([
+      [3, "E1017: Variable already declared: x"],
+    ]);
+  });
+
+  it("reports variables that are not declared", () => {
+    expect(vim9(["echo y", "for i in range(3)", "endfor", "echo i", "{", "  var inner = 1", "}", "echo inner"])).to.deep.equal([
+      [2, "E1001: Variable not found: y"],
+      [5, "E1001: Variable not found: i"],
+      [9, "E1001: Variable not found: inner"],
+    ]);
+  });
+
+  it("reports script variables used before they are declared", () => {
+    expect(vim9(["echo x", "var x = 1", "echo x"], false)).to.deep.equal([[1, "E121: Undefined variable: x"]]);
+  });
+
+  it("allows script variables declared after a function", () => {
+    expect(vim9(["def F()", "  echo later", "enddef", "var later = 1"], false)).to.deep.equal([]);
+  });
+
+  it("allows functions, builtins, constants and globals", () => {
+    expect(vim9(["var F = len", "echo true null null_list g:x v:true", "Undefined()", "echo Later",
+      "var d = {}", "echo d.key"])).to.deep.equal([]);
+  });
+
   it("reports shortened commands and unknown commands", () => {
     expect(vim9(["retu 1"])).to.deep.equal([[2, "E1065: Command cannot be shortened: retu"]]);
     expect(vim9(["k a"])).to.deep.equal([[2, "E1100: Command not supported in Vim9 script (missing :var?): k a"]]);
+    // :xit does not exist, this is an assignment to an undeclared variable
+    expect(vim9(["x = 1"])).to.deep.equal([[2, "E1001: Variable not found: x"]]);
   });
 
   it("reports l: and unknown types", () => {

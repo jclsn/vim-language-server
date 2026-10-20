@@ -1,4 +1,5 @@
-import { INode, IPos } from "../lib/vimparser";
+import { INode, IPos, VimLParser } from "../lib/vimparser";
+import { buildScopeIndex, IDecl, IOccurrence, IScope } from "../server/scope";
 import { getChildren, hasModifier } from "./ast";
 import { IParseError } from "./parse";
 
@@ -6,6 +7,8 @@ const NODE_TOPLEVEL = 1;
 const NODE_EXCMD = 3;
 const NODE_FUNCTION = 4;
 const NODE_LET = 9;
+const NODE_CALL = 78;
+const NODE_DOT = 79;
 const NODE_IDENTIFIER = 86;
 const NODE_LAMBDA = 92;
 const NODE_CONST = 94;
@@ -49,11 +52,30 @@ const builtinTypes: Record<string, boolean> = {};
   "string", "tuple", "void",
 ].forEach((name) => builtinTypes[name] = true);
 
+// names that need no declaration in Vim9 script
+const predefined: Record<string, boolean> = {};
+["true", "false", "null", "this", "super", "_"].forEach((name) => predefined[name] = true);
+
+let builtinFunctions: Record<string, boolean>;
+
+function isBuiltinFunction(name: string): boolean {
+  if (!builtinFunctions) {
+    builtinFunctions = {};
+    ((VimLParser.prototype as any).builtin_functions || []).forEach((f: { name: string }) => {
+      builtinFunctions[f.name] = true;
+    });
+  }
+  return !!builtinFunctions[name];
+}
+
+const isBefore = (a: IPos, b: IPos) => a.lnum < b.lnum || (a.lnum === b.lnum && a.col < b.col);
+
 /*
  * Errors that Vim gives for valid syntax used in the wrong way:
  * - :let in Vim9 script, :var in legacy script and s: in a Vim9 script
- * - declarations without a type or value and unknown types
+ * - declarations without a type or value, declared twice and unknown types
  * - commands that cannot be shortened or do not exist in Vim9 script
+ * - variables that are not declared in a Vim9 script
  *
  * "lines" is the text, to see how a command was written.
  */
@@ -161,5 +183,91 @@ export function lint(root: INode | null, lines: string[] = []): IParseError[] {
   } else {
     visit(root, false);
   }
+  if (vim9script) {
+    lintScopes(root, add);
+  }
   return errors;
+}
+
+// the scope is in a function, which is compiled when it is called
+function inFunction(scope: IScope | undefined): boolean {
+  for (let s = scope; s; s = s.parent) {
+    if (s.kind === "function") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Variables declared twice and variables that are not declared.
+function lintScopes(root: INode, add: (pos: IPos, message: string) => void) {
+  const index = buildScopeIndex(root);
+
+  const checkDuplicates = (decls: IDecl[]) => {
+    const seen: Record<string, boolean> = {};
+    decls.forEach((d) => {
+      const declares = d.vim9 && (d.statement === NODE_VAR || d.statement === NODE_FINAL || d.statement === NODE_CONST);
+      if (!declares || d.name === "_") {
+        return;
+      }
+      if (seen[d.name]) {
+        add(d.pos, `E1017: Variable already declared: ${d.name}`);
+      }
+      seen[d.name] = true;
+    });
+  };
+  const scopes: IScope[] = [index.script];
+  index.occurrences.forEach((occ) => {
+    for (let s: IScope | undefined = occ.scope; s; s = s.parent) {
+      if (scopes.indexOf(s) === -1) {
+        scopes.push(s);
+      }
+    }
+  });
+  scopes.forEach((s) => checkDuplicates(s.decls));
+
+  index.occurrences.forEach((occ) => {
+    if (!isUndeclared(occ)) {
+      return;
+    }
+    const name = occ.node.value;
+    if (inFunction(occ.scope)) {
+      add(occ.node.pos, `E1001: Variable not found: ${name}`);
+    } else {
+      add(occ.node.pos, `E121: Undefined variable: ${name}`);
+    }
+  });
+}
+
+function isUndeclared(occ: IOccurrence): boolean {
+  const { node, parent } = occ;
+  const name: string = node.value;
+  if (!occ.vim9 || typeof name !== "string" || !/^[a-z_]\w*$/.test(name) || predefined[name]) {
+    return false;
+  }
+  // a function call, a member, or a declaration itself
+  if (parent && ((parent.type === NODE_CALL && parent.left === node) || (parent.type === NODE_DOT && parent.right === node))) {
+    return false;
+  }
+  if (/^null_/.test(name) || isBuiltinFunction(name)) {
+    return false;
+  }
+  const compiled = inFunction(occ.scope);
+  for (let s: IScope | undefined = occ.scope; s; s = s.parent) {
+    const found = s.decls.filter((d) => d.name === name);
+    if (found.some((d) => d.node === node)) {
+      return false;
+    }
+    const visible = found.filter((d) => {
+      if (d.kind !== "variable" && d.kind !== "member" && d.kind !== "import") {
+        return true;
+      }
+      // script variables may be declared after a function that uses them
+      return (s!.kind === "script" && compiled) || isBefore(d.pos, node.pos) || d.pos === node.pos;
+    });
+    if (visible.length) {
+      return false;
+    }
+  }
+  return true;
 }

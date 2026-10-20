@@ -73,10 +73,14 @@ export interface IDecl {
   members?: IScope;
   // type of a variable or argument
   type?: string;
+  // the command that declares a variable, e.g. NODE_VAR
+  statement?: number;
+  // declared in Vim9 script
+  vim9?: boolean;
 }
 
 // a name used in the script
-interface IOccurrence {
+export interface IOccurrence {
   node: INode;
   parent?: INode;
   scope: IScope;
@@ -121,7 +125,8 @@ export function buildScopeIndex(root: INode): IScopeIndex {
     return res;
   };
 
-  const declareNames = (scope: IScope, nodes: INode[], kind: IDecl["kind"], exported: boolean) => {
+  const declareNames = (scope: IScope, nodes: INode[], kind: IDecl["kind"], exported: boolean,
+                        statement?: number, vim9?: boolean) => {
     nodes.forEach((n) => {
       if (n && n.type === NODE_IDENTIFIER && n.value) {
         declare(scope, {
@@ -130,6 +135,8 @@ export function buildScopeIndex(root: INode): IScopeIndex {
           node: n,
           exported,
           type: n.type_str || undefined,
+          statement,
+          vim9,
         });
       }
     });
@@ -230,7 +237,7 @@ export function buildScopeIndex(root: INode): IScopeIndex {
         const names = [].concat(node.left || []).concat(node.list || []).concat(node.rest || []);
         // only names without a scope are declared, "let g:x" is global
         const plain = names.filter((n: INode) => n.type === NODE_IDENTIFIER && /^[a-zA-Z_]\w*$/.test(n.value));
-        declareNames(scope, plain, "variable", exported);
+        declareNames(scope, plain, "variable", exported, node.type, vim9);
         names.forEach((n: INode) => walk(n, scope, vim9, node, false));
         return;
       }
