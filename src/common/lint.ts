@@ -7,9 +7,13 @@ const NODE_TOPLEVEL = 1;
 const NODE_EXCMD = 3;
 const NODE_FUNCTION = 4;
 const NODE_LET = 9;
+const NODE_FOR = 19;
+const NODE_EXECUTE = 33;
 const NODE_CALL = 78;
 const NODE_DOT = 79;
+const NODE_STRING = 81;
 const NODE_IDENTIFIER = 86;
+const NODE_CURLYNAME = 87;
 const NODE_LAMBDA = 92;
 const NODE_CONST = 94;
 const NODE_DEF = 101;
@@ -209,6 +213,7 @@ export function lint(root: INode | null, lines: string[] = []): IParseError[] {
   if (vim9script) {
     lintScopes(root, add);
   }
+  lintLegacyVariables(root, vim9script, add);
   return errors;
 }
 
@@ -293,4 +298,184 @@ function isUndeclared(occ: IOccurrence): boolean {
     }
   }
   return true;
+}
+
+// v: variables that also work without "v:", see ":help v:count"
+const compatVariables: Record<string, boolean> = {};
+["count", "errmsg", "shell_error", "this_session", "version", "true", "false", "null", "none", "self"]
+  .forEach((name) => compatVariables[name] = true);
+
+interface ILegacyScope {
+  // names of local variables that are assigned, without "l:"
+  assigned: Record<string, boolean>;
+  args: Record<string, boolean>;
+  variadic: boolean;
+  // variables may be created by :execute, curly-braces names or l:
+  dynamic: boolean;
+  reads: INode[];
+}
+
+// the names assigned by :let, :const and :for, and the base of "let d.key ="
+function assignedNames(node: INode): INode[] {
+  return [].concat(node.left || []).concat(node.list || []).concat(node.rest || [])
+    .map((n: INode) => {
+      let base = n;
+      while (base && base.type !== NODE_IDENTIFIER && base.left) {
+        base = base.left;
+      }
+      return base;
+    })
+    .filter((n: INode) => n && n.type === NODE_IDENTIFIER);
+}
+
+// functions that run commands or code of other languages, which may set
+// variables
+const executeFunctions: Record<string, boolean> = {};
+["execute", "win_execute", "luaeval", "mzeval", "perleval", "py3eval", "pyeval", "pyxeval", "rubyeval"]
+  .forEach((name) => executeFunctions[name] = true);
+
+// commands of other languages
+const languageCommands: Record<string, boolean> = {};
+["lua", "luado", "luafile", "mzscheme", "mzfile", "perl", "perldo", "perlfile", "python", "pydo", "pyfile",
+  "python3", "py3do", "py3file", "pythonx", "pyxdo", "pyxfile", "ruby", "rubydo", "rubyfile", "tcl", "tcldo",
+  "tclfile"].forEach((name) => languageCommands[name] = true);
+
+// :execute, execute() and other languages may define variables
+function isDynamic(node: INode): boolean {
+  if (node.type === NODE_EXECUTE || node.type === NODE_CURLYNAME) {
+    return true;
+  }
+  if (node.type === NODE_CALL) {
+    return node.left && node.left.type === NODE_IDENTIFIER && !!executeFunctions[node.left.value];
+  }
+  const cmd = node.ea && node.ea.cmd;
+  return node.type === NODE_EXCMD && !!cmd && !!languageCommands[cmd.name];
+}
+
+/*
+ * Variables that are certainly not defined in legacy script.  A legacy
+ * function can only use its own local variables without a scope, so a
+ * variable that the function never assigns is undefined.  An a: variable
+ * must be an argument and an s: variable must be assigned in the script.
+ * Variables at the script level may be global variables set elsewhere.
+ */
+function lintLegacyVariables(root: INode, vim9script: boolean, add: (pos: IPos, message: string) => void) {
+  const scriptAssigned: Record<string, boolean> = {};
+  let scriptDynamic = vim9script;
+  const scriptReads: INode[] = [];
+  const functions: ILegacyScope[] = [];
+
+  const visit = (node: INode, scope: ILegacyScope | undefined, lambdaArgs: Record<string, boolean>, parent?: INode) => {
+    if (!node || typeof node.type !== "number") {
+      return;
+    }
+    if (node.type === NODE_FUNCTION) {
+      const fscope: ILegacyScope = { assigned: {}, args: {}, variadic: false, dynamic: false, reads: [] };
+      (node.rlist || []).forEach((arg) => {
+        if (arg.value === "...") {
+          fscope.variadic = true;
+        } else {
+          fscope.args[arg.value] = true;
+        }
+      });
+      // a closure can use the variables of the function it is defined in
+      fscope.dynamic = !!(node.attr && (node.attr as any).closure);
+      functions.push(fscope);
+      if (node.left && node.left.type === NODE_IDENTIFIER && /^s:/.test(node.left.value)) {
+        scriptAssigned[node.left.value] = true;
+      }
+      (node.body || []).forEach((n) => visit(n, fscope, {}, node));
+      (node.default_args || []).forEach((n) => visit(n, fscope, {}, node));
+      return;
+    }
+    if (node.type === NODE_DEF || vim9Bodies[node.type] && !(node.type === NODE_LAMBDA && node.rettype === undefined)) {
+      // Vim9 syntax is checked with the scopes of Vim9 script
+      return;
+    }
+    if (isDynamic(node)) {
+      if (scope) {
+        scope.dynamic = true;
+      }
+      if (JSON.stringify(node).match(/\bs:|\blet\b|\bfor\b/)) {
+        scriptDynamic = true;
+      }
+    }
+    // :redir => var
+    const redir = node.type === NODE_EXCMD && (node.str || "").match(/^\s*:*\s*redi?r?!?\s*=>>?\s*([\w:]+)/);
+    if (redir) {
+      if (/^s:/.test(redir[1])) {
+        scriptAssigned[redir[1]] = true;
+      } else if (scope) {
+        scope.assigned[redir[1].replace(/^l:/, "")] = true;
+      }
+    }
+    // :var is an error in legacy script, it still sets the variable
+    if (node.type === NODE_LET || node.type === NODE_CONST || node.type === NODE_FOR || node.type === NODE_VAR
+      || node.type === NODE_FINAL) {
+      assignedNames(node).forEach((n) => {
+        const name: string = n.value;
+        if (/^s:/.test(name)) {
+          scriptAssigned[name] = true;
+        } else if (scope) {
+          scope.assigned[name.replace(/^l:/, "")] = true;
+        }
+      });
+    }
+    if (node.type === NODE_IDENTIFIER) {
+      const isCall = parent && parent.type === NODE_CALL && parent.left === node;
+      const isMember = parent && parent.type === NODE_DOT && parent.right === node;
+      if (!isCall && !isMember && !lambdaArgs[node.value]) {
+        if (node.value === "s:" || node.value === "l:") {
+          scriptDynamic = scriptDynamic || node.value === "s:";
+          if (scope && node.value === "l:") {
+            scope.dynamic = true;
+          }
+        } else if (/^s:/.test(node.value)) {
+          scriptReads.push(node);
+        } else if (scope) {
+          scope.reads.push(node);
+        }
+      }
+      return;
+    }
+    let args = lambdaArgs;
+    if (node.type === NODE_LAMBDA) {
+      args = { ...lambdaArgs };
+      (node.rlist || []).forEach((arg) => args[arg.value] = true);
+    }
+    getChildren(node).forEach((child) => visit(child, scope, args, node));
+  };
+  visit(root, undefined, {});
+
+  const undefinedVariable = (node: INode) => add(node.pos, `E121: Undefined variable: ${node.value}`);
+  functions.forEach((f) => {
+    f.reads.forEach((node) => {
+      const name: string = node.value;
+      const m = name.match(/^a:(.*)$/);
+      if (m) {
+        const arg = m[1];
+        const ok = f.args[arg] || arg === "firstline" || arg === "lastline"
+          || (f.variadic && /^(\d+|000)$/.test(arg));
+        if (!ok && /^\w+$/.test(arg)) {
+          undefinedVariable(node);
+        }
+        return;
+      }
+      const local = name.replace(/^l:/, "");
+      if (f.dynamic || !/^[a-z_]\w*$/.test(local) || f.assigned[local]) {
+        return;
+      }
+      if (name === local && (compatVariables[name] || isBuiltinFunction(name))) {
+        return;
+      }
+      undefinedVariable(node);
+    });
+  });
+  if (!scriptDynamic) {
+    scriptReads.forEach((node) => {
+      if (!scriptAssigned[node.value] && /^s:\w+$/.test(node.value)) {
+        undefinedVariable(node);
+      }
+    });
+  }
 }

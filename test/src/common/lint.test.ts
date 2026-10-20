@@ -104,3 +104,68 @@ describe("lint of Vim9 script", () => {
     ]);
   });
 });
+
+describe("lint of legacy variables", () => {
+  const legacy = (lines: string[]) => {
+    const [node, errors] = parseWithRecovery(lines, false);
+    expect(errors).to.deep.equal([]);
+    return lint(node, lines).map((e) => [e.line, e.message]);
+  };
+
+  it("reports local variables that a function never sets", () => {
+    expect(legacy([
+      "function F(arg) abort",
+      "  let x = 1",
+      "  for [k, v] in items({})",
+      "  endfor",
+      "  echo x k v l:x count arg",
+      "endfunction",
+    ])).to.deep.equal([[4, "E121: Undefined variable: arg"]]);
+  });
+
+  it("reports a: variables that are not arguments", () => {
+    expect(legacy([
+      "function F(name, ...) abort",
+      "  echo a:name a:0 a:1 a:000 a:firstline a:other",
+      "endfunction",
+      "function G() abort",
+      "  echo a:0",
+      "endfunction",
+    ])).to.deep.equal([[1, "E121: Undefined variable: a:other"], [4, "E121: Undefined variable: a:0"]]);
+  });
+
+  it("reports s: variables that the script never sets", () => {
+    expect(legacy([
+      "let s:set = 1",
+      "redir => s:output",
+      "redir END",
+      "function s:F() abort",
+      "  echo s:set s:output s:missing",
+      "  call s:F()",
+      "endfunction",
+    ])).to.deep.equal([[4, "E121: Undefined variable: s:missing"]]);
+  });
+
+  it("skips functions that may define variables dynamically", () => {
+    expect(legacy([
+      "function F() abort",
+      "  execute 'let x = 1'",
+      "  echo x",
+      "endfunction",
+      "function G() abort",
+      "  call win_execute(1, 'let y = 1')",
+      "  echo y",
+      "endfunction",
+      "function H() abort closure",
+      "  echo z",
+      "endfunction",
+      "function I() abort",
+      "  echo [1]->map({_, v -> v + w})",
+      "endfunction",
+    ])).to.deep.equal([[12, "E121: Undefined variable: w"]]);
+  });
+
+  it("does not check variables at the script level", () => {
+    expect(legacy(["echo global_set_elsewhere"])).to.deep.equal([]);
+  });
+});
