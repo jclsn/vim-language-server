@@ -51,7 +51,7 @@ var pat_vim2js = {
   "\\w" : "[0-9A-Za-z_]",
   "\\w\\|[:#]" : "[0-9A-Za-z_]|[:#]",
   "\\x" : "[0-9A-Fa-f]",
-  "^++" : "^\+\+",
+  "^++" : "^\\+\\+",
   "^++bad=\\(keep\\|drop\\|.\\)\\>" : "^\\+\\+bad=(keep|drop|.)\\b",
   "^++bad=drop" : "^\\+\\+bad=drop",
   "^++bad=keep" : "^\\+\\+bad=keep",
@@ -3846,13 +3846,24 @@ ExprTokenizer.prototype.skip_vim9_newline = function(force) {
         if (r.peek() == "#" && r.tell() > 0 && (iswhite(r.p(-1)) || r.p(-1) == "<EOL>")) {
             r.getn(-1);
         }
-        if (r.peek() != "<EOL>" || !(force || this.depth > 0 || this.next_line_continues())) {
+        if (r.peek() != "<EOL>" || !(force || this.depth > 0 || this.next_line_continues()) || this.next_line_is_enddef()) {
             r.seek_set(pos);
             return;
         }
         r.get();
         var force = TRUE;
     }
+}
+
+// :enddef cannot be used at the start of a continuation line.
+ExprTokenizer.prototype.next_line_is_enddef = function() {
+    var r = this.reader;
+    var pos = r.tell();
+    r.get();
+    r.skip_white();
+    var result = r.read_alpha() == "enddef" && !iswordc(r.peekn(1));
+    r.seek_set(pos);
+    return result;
 }
 
 // Return TRUE when the next line, ignoring comments and empty lines, starts
