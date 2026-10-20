@@ -35,7 +35,11 @@ const missingEnd: Record<number, string> = {
   [NODE_CLASS]: "E1101: Missing :endclass",
   [NODE_INTERFACE]: "E1101: Missing :endinterface",
   [NODE_ENUM]: "E1101: Missing :endenum",
+  [NODE_LAMBDA]: "E1171: Missing } after inline function",
 };
+
+// a line that starts the block of a Vim9 lambda: "(args) => {"
+const lambdaBlockPattern = /=>\s*\{\s*(#.*)?$/;
 
 // commands that start a block, with the node used when the command fails
 const blockCommands: Record<string, () => Partial<INode>> = {
@@ -110,6 +114,21 @@ export function normalizeMessage(message: string, line: string, col: number): st
   return message;
 }
 
+// the arguments of the lambda "(args) => {" at the end of "line"
+function lambdaArguments(line: string, lnum: number): INode[] {
+  const m = line.match(/\(([^()]*)\)(\s*:[^=]*)?\s*=>\s*\{\s*(#.*)?$/);
+  if (!m) {
+    return [];
+  }
+  let col = line.lastIndexOf(m[0]) + 1;
+  return m[1].split(",").map((arg) => {
+    const name = arg.match(/^\s*((?:\.\.\.)?\w+)/);
+    const pos = col + (name ? arg.indexOf(name[1]) + 1 : 0);
+    col += arg.length + 1;
+    return name ? { type: NODE_IDENTIFIER, value: name[1], pos: { lnum, col: pos, offset: 0 } } as INode : undefined;
+  }).filter((n) => !!n);
+}
+
 // Skip to the start of the line after "lnum" (1-based), at least one line.
 function skipLine(reader: StringReader, start: number, lnum: number) {
   const len = reader.buf.length;
@@ -137,9 +156,24 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
   const parser = new VimLParser(isNeovim);
   const parseOneCmd = parser.parse_one_cmd;
 
+  // lambdas with a block opened for a line that failed
+  const openLambdas: INode[] = [];
+
   parser.parse_one_cmd = function() {
     const start = this.reader.i;
     const depth = this.context.length;
+    const lambda = openLambdas.length ? openLambdas[openLambdas.length - 1] : undefined;
+    if (lambda && this.context[0] === lambda) {
+      // the "}" at the start of a line ends the block, the rest of the line
+      // belongs to the expression that failed
+      const lnum = this.reader.pos[start] ? this.reader.pos[start][0] : 0;
+      if (/^\s*\}/.test(lines[lnum - 1] || "")) {
+        this.context.shift();
+        openLambdas.pop();
+        skipLine(this.reader, start, lnum);
+        return;
+      }
+    }
     try {
       parseOneCmd.call(this);
     } catch (e) {
@@ -165,6 +199,18 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
         } as INode;
         this.context[0].body.push(node);
         this.context.unshift(node);
+      } else if (this.context.length === depth && lambdaBlockPattern.test(lines[error.line] || "")) {
+        // parse the block of the lambda, for its own errors
+        const node = {
+          type: NODE_LAMBDA,
+          pos: { ...this.ea.cmdpos, lnum: error.line + 1, col: 1 },
+          body: [],
+          rlist: lambdaArguments(lines[error.line], error.line + 1),
+          rettype: "",
+        } as INode;
+        this.context[0].body.push(node);
+        this.context.unshift(node);
+        openLambdas.push(node);
       }
       skipLine(this.reader, start, error.line + 1);
     }
@@ -185,6 +231,12 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
   });
   try {
     const node = parser.parse(reader);
+    // lambdas that are not closed at the end of the file
+    openLambdas.forEach((lambda) => errors.push({
+      message: missingEnd[NODE_LAMBDA],
+      line: lambda.pos.lnum - 1,
+      col: 0,
+    }));
     return [node, normalize(errors)];
   } catch (e) {
     const error = toParseError(e);

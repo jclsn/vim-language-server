@@ -67,3 +67,23 @@ describe("commands that fail to parse", () => {
     expect(messages("var x = foo(\n")).to.deep.equal([[0, "E15"], [0, "E1124"]]);
   });
 });
+
+describe("lambda blocks of lines that fail", () => {
+  it("parse the block as the body of the lambda", () => {
+    const [, errors] = parse([
+      "vim9script",
+      "    handler: (diags: list<dict<any>>) => {",
+      "      return diags->filter((_, d) => {",
+      "        return d.ok",
+      "      })",
+      "    }",
+      "echo 1",
+    ].join("\n"));
+    expect(errors.map((e) => [e.line, e.message.replace(/:.*/, "")])).to.deep.equal([[1, "E492"]]);
+  });
+
+  it("report a block that is not closed", () => {
+    const [, errors] = parse("vim9script\n  name: (x) => {\n    return x\n");
+    expect(errors.map((e) => [e.line, e.message.replace(/:.*/, "")])).to.deep.equal([[1, "E492"], [1, "E1171"]]);
+  });
+});
