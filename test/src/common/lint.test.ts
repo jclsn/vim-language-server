@@ -35,3 +35,10 @@ describe("lint", () => {
     expect(check("vim9script\necho s:x\nlegacy echo s:x\n")).to.deep.equal([[1, "E1268"]]);
   });
 });
+
+describe("lint of legacy lambdas", () => {
+  it("allows s: in a legacy lambda in a Vim9 script", () => {
+    const [node] = parseWithRecovery(["vim9script", "function F()", "  return {-> s:x}", "endfunction"], false);
+    expect(lint(node)).to.deep.equal([]);
+  });
+});

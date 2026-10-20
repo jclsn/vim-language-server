@@ -60,9 +60,11 @@ export function lint(root: INode | null): IParseError[] {
     } else if (node.type === NODE_IDENTIFIER && vim9 && vim9script && /^s:/.test(node.value)) {
       add(node, `E1268: Cannot use s: in Vim9 script: ${node.value}`);
     }
+    // a legacy lambda {args -> expr} has no "rettype"
+    const vim9Lambda = node.type === NODE_LAMBDA && node.rettype !== undefined;
     if (node.type === NODE_FUNCTION) {
       getChildren(node).forEach((child) => visit(child, child === node.left ? vim9 : false));
-    } else if (vim9Bodies[node.type]) {
+    } else if (vim9Lambda || (node.type !== NODE_LAMBDA && vim9Bodies[node.type])) {
       getChildren(node).forEach((child) => visit(child, true));
     } else {
       getChildren(node).forEach((child) => visit(child, vim9));
