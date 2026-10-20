@@ -42,3 +42,36 @@ describe("lint of legacy lambdas", () => {
     expect(lint(node)).to.deep.equal([]);
   });
 });
+
+// lint a Vim9 script, with the code of "lines" in a :def function or at the
+// script level
+const vim9 = (lines: string[], inDef = true) => {
+  const text = inDef
+    ? ["vim9script", "def T()"].concat(lines.map((l) => `  ${l}`), ["enddef"])
+    : ["vim9script"].concat(lines);
+  const [node, errors] = parseWithRecovery(text, false);
+  expect(errors).to.deep.equal([]);
+  return lint(node, text).map((e) => [e.line, e.message]);
+};
+
+describe("lint of Vim9 script", () => {
+  it("reports declarations without type or value", () => {
+    expect(vim9(["var x", "final y", "const Z", "var ok: number"])).to.deep.equal([
+      [2, "E1022: Type or initialization required"],
+      [3, "E1125: Final requires a value"],
+      [4, "E1021: Const requires a value"],
+    ]);
+  });
+
+  it("reports shortened commands and unknown commands", () => {
+    expect(vim9(["retu 1"])).to.deep.equal([[2, "E1065: Command cannot be shortened: retu"]]);
+    expect(vim9(["k a"])).to.deep.equal([[2, "E1100: Command not supported in Vim9 script (missing :var?): k a"]]);
+  });
+
+  it("reports l: and unknown types", () => {
+    expect(vim9(["echo l:x", "var n: numbr = 1"])).to.deep.equal([
+      [2, "E1075: Namespace not supported: l:x"],
+      [3, "E1010: Type not recognized: numbr"],
+    ]);
+  });
+});

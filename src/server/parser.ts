@@ -156,7 +156,7 @@ export function next(
         if (res) {
           if (config.diagnostic.enable) {
             // handle diagnostic
-            handleDiagnostic(td, res[1].concat(lint(res[0])));
+            handleDiagnostic(td, res[1].concat(lint(res[0], td.getText().split(/\r\n|\r|\n/))));
           }
           // handle node
           workspace.updateBuffer(uri, res[0]);
