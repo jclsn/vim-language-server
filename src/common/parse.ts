@@ -167,10 +167,19 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
     }
   };
 
-  const normalize = (list: IParseError[]) => list.map((error) => ({
-    ...error,
-    message: normalizeMessage(error.message, lines[error.line], error.col),
-  }));
+  const normalize = (list: IParseError[]) => list.map((error) => {
+    const message = normalizeMessage(error.message, lines[error.line], error.col);
+    let { line, col } = error;
+    // an expression that continues at the end of the file: report it at the
+    // end of the last line with text, not on the empty line after it
+    if (/unexpected end of line$/.test(message)) {
+      while (line > 0 && !(lines[line] || "").trim()) {
+        line -= 1;
+        col = (lines[line] || "").length;
+      }
+    }
+    return { ...error, message, line, col };
+  });
   try {
     const node = parser.parse(reader);
     return [node, normalize(errors)];

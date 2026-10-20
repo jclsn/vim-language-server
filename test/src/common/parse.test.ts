@@ -50,3 +50,10 @@ describe("parse error messages", () => {
     expect(messages("let [a, b = [1, 2]\n")).to.deep.equal(["E475: Invalid argument: ="]);
   });
 });
+
+describe("errors at the end of the file", () => {
+  it("reports an unfinished expression on its last line", () => {
+    const [, errors] = parse("let x = 1\nlet y = (\n\n");
+    expect(errors.map((e) => [e.line, e.col])).to.deep.equal([[1, 9]]);
+  });
+});
