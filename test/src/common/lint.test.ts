@@ -92,7 +92,9 @@ describe("lint of Vim9 script", () => {
 
   it("reports shortened commands and unknown commands", () => {
     expect(vim9(["retu 1"])).to.deep.equal([[2, "E1065: Command cannot be shortened: retu"]]);
-    expect(vim9(["k a"])).to.deep.equal([[2, "E1100: Command not supported in Vim9 script (missing :var?): k a"]]);
+    // the parser gives E1100 for commands that do not exist in Vim9 script
+    const [, errors] = parseWithRecovery(["vim9script", "k a"], false);
+    expect(errors.map((e) => e.message)).to.deep.equal(["E1100: Command not supported in Vim9 script (missing :var?): k a"]);
     // :xit does not exist, this is an assignment to an undeclared variable
     expect(vim9(["x = 1"])).to.deep.equal([[2, "E1001: Variable not found: x"]]);
   });

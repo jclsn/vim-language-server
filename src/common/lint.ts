@@ -45,10 +45,6 @@ const noShorten: Record<string, boolean> = {};
   "this", "type", "var",
 ].forEach((name) => noShorten[name] = true);
 
-// commands that do not exist in Vim9 script, see ":help E1100"
-const notInVim9: Record<string, boolean> = {};
-["append", "change", "insert", "k", "mode", "open", "t", "xit", "Print"].forEach((name) => notInVim9[name] = true);
-
 // builtin types, see ":help vim9-types"
 const builtinTypes: Record<string, boolean> = {};
 [
@@ -103,7 +99,7 @@ const isBefore = (a: IPos, b: IPos) => a.lnum < b.lnum || (a.lnum === b.lnum && 
  * Errors that Vim gives for valid syntax used in the wrong way:
  * - :let in Vim9 script, :var in legacy script and s: in a Vim9 script
  * - declarations without a type or value, declared twice and unknown types
- * - commands that cannot be shortened or do not exist in Vim9 script
+ * - commands that cannot be shortened in Vim9 script
  * - variables that are not declared in a Vim9 script
  *
  * "lines" is the text, to see how a command was written.
@@ -133,9 +129,6 @@ export function lint(root: INode | null, lines: string[] = []): IParseError[] {
     lintCommand(node.ea, true, lines)
       .filter((e) => /^E1065/.test(e.message))
       .forEach((e) => errors.push(e));
-    if (node.type === NODE_EXCMD && notInVim9[cmd.name]) {
-      add(pos, `E1100: Command not supported in Vim9 script (missing :var?): ${node.str}`);
-    }
   };
 
   const checkType = (pos: IPos, type: string | undefined) => {

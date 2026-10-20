@@ -491,6 +491,11 @@ function islower(c) {
     return viml_eqregh(c, "^[a-z]$");
 }
 
+// Return TRUE for a command that does not exist in Vim9 script.
+function is_removed_in_vim9(name) {
+    return name == "append" || name == "change" || name == "insert" || name == "k" || name == "mode" || name == "open" || name == "t" || name == "xit" || name == "Print";
+}
+
 // Return TRUE when the text ends in white space and "{".
 function ends_with_block(str) {
     var last = "";
@@ -995,8 +1000,7 @@ VimLParser.prototype.is_vim9_command = function(cmdpos) {
     if (cmd === NIL) {
         return FALSE;
     }
-    var name = cmd.name;
-    return name != "append" && name != "change" && name != "insert" && name != "k" && name != "mode" && name != "open" && name != "t" && name != "xit" && name != "Print";
+    return !is_removed_in_vim9(cmd.name);
 }
 
 // Return the assignment operator at the cursor, or an empty string.
@@ -1423,6 +1427,10 @@ VimLParser.prototype.parse_command = function() {
     if (this.ea.cmd === NIL) {
         this.reader.setpos(this.ea.cmdpos);
         throw Err(viml_printf("E492: Not an editor command: %s", this.reader.peekline()), this.ea.cmdpos);
+    }
+    if (this.isvim9() && is_removed_in_vim9(this.ea.cmd.name)) {
+        this.reader.setpos(this.ea.cmdpos);
+        throw Err(viml_printf("E1100: Command not supported in Vim9 script (missing :var?): %s", this.reader.peekline()), this.ea.cmdpos);
     }
     // In legacy script :final is an abbreviation of :finally.
     if (this.ea.cmd.name == "final" && !this.isvim9()) {
