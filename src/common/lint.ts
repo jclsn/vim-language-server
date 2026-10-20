@@ -68,6 +68,31 @@ function isBuiltinFunction(name: string): boolean {
   return !!builtinFunctions[name];
 }
 
+/*
+ * Errors for how a command is written, also for a command that failed to
+ * parse: a shortened command in Vim9 script, :let in Vim9 script and :var
+ * in legacy script.
+ */
+export function lintCommand(ea: any, vim9: boolean, lines: string[]): IParseError[] {
+  const cmd = ea && ea.cmd;
+  const pos: IPos = ea && ea.cmdpos;
+  if (!cmd || !cmd.name || !pos || !pos.lnum) {
+    return [];
+  }
+  const error = (message: string) => [{ message, line: pos.lnum - 1, col: Math.max(pos.col - 1, 0) }];
+  const m = (lines[pos.lnum - 1] || "").slice(pos.col - 1).match(/^[a-zA-Z]+/);
+  if (vim9 && noShorten[cmd.name] && m && m[0] !== cmd.name && cmd.name.indexOf(m[0]) === 0) {
+    return error(`E1065: Command cannot be shortened: ${m[0]}`);
+  }
+  if (vim9 && cmd.name === "let") {
+    return error("E1126: Cannot use :let in Vim9 script");
+  }
+  if (!vim9 && cmd.name === "var") {
+    return error(`E1124: ":var" cannot be used in legacy Vim script`);
+  }
+  return [];
+}
+
 const isBefore = (a: IPos, b: IPos) => a.lnum < b.lnum || (a.lnum === b.lnum && a.col < b.col);
 
 /*
@@ -101,11 +126,9 @@ export function lint(root: INode | null, lines: string[] = []): IParseError[] {
     if (!cmd || !cmd.name || !pos || !pos.lnum) {
       return;
     }
-    const text = (lines[pos.lnum - 1] || "").slice(pos.col - 1);
-    const m = text.match(/^[a-zA-Z]+/);
-    if (noShorten[cmd.name] && m && m[0] !== cmd.name && cmd.name.indexOf(m[0]) === 0) {
-      add(pos, `E1065: Command cannot be shortened: ${m[0]}`);
-    }
+    lintCommand(node.ea, true, lines)
+      .filter((e) => /^E1065/.test(e.message))
+      .forEach((e) => errors.push(e));
     if (node.type === NODE_EXCMD && notInVim9[cmd.name]) {
       add(pos, `E1100: Command not supported in Vim9 script (missing :var?): ${node.str}`);
     }

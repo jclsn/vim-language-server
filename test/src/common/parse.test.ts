@@ -57,3 +57,13 @@ describe("errors at the end of the file", () => {
     expect(errors.map((e) => [e.line, e.col])).to.deep.equal([[1, 9]]);
   });
 });
+
+describe("commands that fail to parse", () => {
+  const messages = (text: string) => parse(text)[1].map((e) => [e.line, e.message.replace(/:.*/, "")]);
+
+  it("are checked for Vim9 script errors", () => {
+    expect(messages("vim9script\nretu 1\n")).to.deep.equal([[1, "E133"], [1, "E1065"]]);
+    expect(messages("vim9script\nlet x = (\n")).to.deep.equal([[1, "E15"], [1, "E1126"]]);
+    expect(messages("var x = foo(\n")).to.deep.equal([[0, "E15"], [0, "E1124"]]);
+  });
+});

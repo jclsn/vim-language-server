@@ -1,4 +1,5 @@
 import { INode, StringReader, VimLParser } from "../lib/vimparser";
+import { lintCommand } from "./lint";
 
 export interface IParseError {
   message: string;
@@ -147,6 +148,8 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
         throw e;
       }
       errors.push(error);
+      // the command is checked here, there is no node for it
+      lintCommand(this.ea, (this as any).isvim9(), lines).forEach((e) => errors.push(e));
       // drop lambdas that were not closed
       while (this.context.length > depth && this.context[0].type === NODE_LAMBDA) {
         this.context.shift();
