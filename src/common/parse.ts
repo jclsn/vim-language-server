@@ -61,6 +61,54 @@ function toParseError(error: any): IParseError | undefined {
   };
 }
 
+// quote of a string that is not closed before "col" in "line"
+function openQuote(line: string, col: number): string {
+  let quote = "";
+  for (let i = 0; i < Math.min(col, line.length); i++) {
+    const c = line[i];
+    if (quote === "\"" && c === "\\") {
+      i++;
+    } else if (quote && c === quote) {
+      quote = "";
+    } else if (!quote && (c === "'" || c === "\"")) {
+      quote = c;
+    }
+  }
+  return quote;
+}
+
+/*
+ * Messages of the parser like Vim gives them, with the error number:
+ * "unexpected token: <EOL>" is "E15: Invalid expression".
+ */
+export function normalizeMessage(message: string, line: string, col: number): string {
+  let m = message.match(/^unexpected (?:token|character): (.*?)(?:, type: \d+)?$/);
+  if (m) {
+    return m[1] === "<EOL>" || m[1] === "<EOF>"
+      ? "E15: Invalid expression: unexpected end of line"
+      : `E15: Invalid expression: unexpected "${m[1]}"`;
+  }
+  if (/^(ExprTokenizer: )?unexpecte?d EOL$/.test(message)) {
+    return openQuote(line || "", line ? line.length : col) === "'"
+      ? "E115: Missing single quote"
+      : "E114: Missing double quote";
+  }
+  if (message === "Invalid Expression") {
+    return "E15: Invalid expression";
+  }
+  if (message === "Not an function call") {
+    return "E107: Missing parentheses";
+  }
+  if (message === 'Missing "in" after :for') {
+    return 'E690: Missing "in" after :for';
+  }
+  m = message.match(/^(E\d+) (.*)$/);
+  if (m) {
+    return `${m[1]}: ${m[2]}`;
+  }
+  return message;
+}
+
 // Skip to the start of the line after "lnum" (1-based), at least one line.
 function skipLine(reader: StringReader, start: number, lnum: number) {
   const len = reader.buf.length;
@@ -119,14 +167,18 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
     }
   };
 
+  const normalize = (list: IParseError[]) => list.map((error) => ({
+    ...error,
+    message: normalizeMessage(error.message, lines[error.line], error.col),
+  }));
   try {
     const node = parser.parse(reader);
-    return [node, errors];
+    return [node, normalize(errors)];
   } catch (e) {
     const error = toParseError(e);
     if (!error || !parser.context || !parser.context.length) {
       errors.push(error || { message: `${e}`, line: 0, col: 0 });
-      return [null, errors];
+      return [null, normalize(errors)];
     }
     // unclosed blocks at the end of the file
     const open = parser.context.filter((node) => missingEnd[node.type]);
@@ -141,6 +193,6 @@ export function parseWithRecovery(lines: string[], isNeovim: boolean): [INode | 
     } else {
       errors.push(error);
     }
-    return [parser.context[parser.context.length - 1], errors];
+    return [parser.context[parser.context.length - 1], normalize(errors)];
   }
 }

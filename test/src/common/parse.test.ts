@@ -36,3 +36,17 @@ describe("parseWithRecovery", () => {
     expect(errors.map((e) => [e.line, e.col])).to.deep.equal([[2, 2]]);
   });
 });
+
+describe("parse error messages", () => {
+  const messages = (text: string) => parse(text)[1].map((e) => e.message);
+
+  it("uses the errors of Vim", () => {
+    expect(messages("let x = 1 +\n")).to.deep.equal(["E15: Invalid expression: unexpected end of line"]);
+    expect(messages("echo [1 2]\n")).to.deep.equal(['E15: Invalid expression: unexpected "2"']);
+    expect(messages("echo \"abc\n")).to.deep.equal(["E114: Missing double quote"]);
+    expect(messages("echo 'abc\n")).to.deep.equal(["E115: Missing single quote"]);
+    expect(messages("call Foo\n")).to.deep.equal(["E107: Missing parentheses"]);
+    expect(messages("for in [1]\nendfor\n")).to.deep.equal(['E690: Missing "in" after :for']);
+    expect(messages("let [a, b = [1, 2]\n")).to.deep.equal(["E475: Invalid argument: ="]);
+  });
+});
